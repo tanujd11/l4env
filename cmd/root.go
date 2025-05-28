@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/tanujd11/l4env/internal"
+	"github.com/tanujd11/l4env/internal/cmd"
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -35,9 +35,9 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.AddCommand(internal.ClusterCommand())
-	rootCmd.AddCommand(internal.InitCommand())
-	rootCmd.AddCommand(internal.UpgradeCommand())
-	rootCmd.AddCommand(internal.AddWorkerCommand())
-	rootCmd.AddCommand(internal.AddMasterCommand())
+	rootCmd.AddCommand(cmd.ClusterCommand())
+	rootCmd.AddCommand(cmd.InitCommand())
+	rootCmd.AddCommand(cmd.UpgradeCommand())
+	rootCmd.AddCommand(cmd.AddWorkerCommand())
+	rootCmd.AddCommand(cmd.AddMasterCommand())
 }

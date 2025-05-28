@@ -1,4 +1,4 @@
-package internal
+package cmd
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/tanujd11/l4env/internal/config"
 )
 
 var (
@@ -20,6 +21,15 @@ func AddWorkerCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			if sshKeyPath == "" && sshPassword == "" {
 				log.Fatal("Either --key or --password must be provided for SSH authentication")
+			}
+
+			var conf config.ResolvedConfig
+			var err error
+			if filePath != "" {
+				conf, err = config.ResolveConfig(filePath)
+				if err != nil {
+					log.Fatalf("Failed to resolve configuration file %s: %v", filePath, err)
+				}
 			}
 
 			wm := filterEmpty(strings.Split(newWorkers, ","))
@@ -44,17 +54,20 @@ func AddWorkerCommand() *cobra.Command {
 			for _, w := range wm {
 				joinCmd := fmt.Sprintf(
 					"sudo kubeadm join %s:6443 --token %s --discovery-token-ca-cert-hash %s",
-					advertiseAddr, token, caHash,
+					conf.AdvertiseAddr, token, caHash,
 				)
 				runCmd(w, joinCmd)
 				fmt.Printf("Worker %s joined.\n", w)
 			}
+			// label node-role to all the workers
+			nodeRoleCmd := "kubectl get nodes --selector='!node-role.kubernetes.io/control-plane' -o name | xargs -I{} kubectl label {} node-role.kubernetes.io/worker=	"
+			runCmd(primary, nodeRoleCmd)
+			fmt.Println("Cluster creation complete.")
 		},
 	}
 
 	cmd.Flags().StringVar(&primary, "primary", "", "API endpoint or IP of the control-plane to retrieve join token")
 	cmd.Flags().StringVar(&newWorkers, "workers", "", "Comma-separated list of new worker node IPs/hosts to add")
-	cmd.Flags().StringVar(&advertiseAddr, "advertise-addr", "", "Advertise address for the control-plane")
 	cmd.Flags().IntVar(&sshPort, "port", 22, "SSH port")
 	cmd.Flags().StringVar(&sshUser, "user", "root", "SSH user")
 	cmd.Flags().StringVar(&sshKeyPath, "key", "", "Path to private key file")

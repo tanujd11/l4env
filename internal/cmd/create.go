@@ -1,29 +1,37 @@
-package internal
+package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
 	"regexp"
 	"strings"
+	"text/template"
 	"time"
 
+	_ "embed"
+
 	"github.com/spf13/cobra"
+	"github.com/tanujd11/l4env/internal/config"
 	"golang.org/x/crypto/ssh"
 	yaml "gopkg.in/yaml.v3"
 )
 
+//go:embed assets/bgp.yaml.tpl
+var bgpYaml string
+
+//go:embed assets/cp-bgp.yaml.tpl
+var cpBGPYaml string
+
 var (
-	masters                  string
-	workers                  string
-	sshPort                  int
-	sshUser                  string
-	sshKeyPath               string
-	sshPassword              string
-	advertiseAddr            string
-	initialMasterPrivateAddr string
-	podCIDR                  string
-	enableKubeProxy          bool
+	masters     string
+	workers     string
+	sshPort     int
+	sshUser     string
+	sshKeyPath  string
+	sshPassword string
+	filePath    string
 )
 
 // ClusterCommand returns the Cobra command for creating a Kubernetes cluster
@@ -41,17 +49,12 @@ func ClusterCommand() *cobra.Command {
 	cmd.Flags().StringVar(&sshUser, "user", "root", "SSH user")
 	cmd.Flags().StringVar(&sshKeyPath, "key", "", "Path to private key file")
 	cmd.Flags().StringVar(&sshPassword, "password", "", "SSH password (optional)")
-	cmd.Flags().BoolVar(&enableKubeProxy, "enable-kube-proxy", false, "Enable kube-proxy addon (default: false)")
 
-	// kubeadm flags
-	cmd.Flags().StringVar(&advertiseAddr, "advertise-addr", "", "API server advertise address VIP")
-	cmd.Flags().StringVar(&initialMasterPrivateAddr, "initial-master-private-addr", "", "initial master private address if masters are public")
-	cmd.Flags().StringVar(&podCIDR, "pod-cidr", "192.168.0.0/16", "Pod network CIDR")
+	cmd.Flags().StringVar(&filePath, "values-file", "", "Path to a file containing the cluster configuration (optional)")
 
 	// Required flags
 	cmd.MarkFlagRequired("masters")
-	cmd.MarkFlagRequired("advertise-addr")
-	cmd.MarkFlagRequired("kube-version")
+	cmd.MarkFlagRequired("initial-master-private-addr")
 
 	return cmd
 }
@@ -62,8 +65,13 @@ func run(cmd *cobra.Command, args []string) {
 		log.Fatalf("Either --key or --password must be provided for SSH authentication")
 	}
 
-	if initialMasterPrivateAddr == "" {
-		initialMasterPrivateAddr = advertiseAddr
+	var conf config.ResolvedConfig
+	var err error
+	if filePath != "" {
+		conf, err = config.ResolveConfig(filePath)
+		if err != nil {
+			log.Fatalf("Failed to resolve configuration file %s: %v", filePath, err)
+		}
 	}
 	masterList := filterEmpty(strings.Split(masters, ","))
 	initialMaster := masterList[0]
@@ -88,7 +96,7 @@ func run(cmd *cobra.Command, args []string) {
 	}
 
 	skipPhases := ""
-	if !enableKubeProxy {
+	if !conf.EnableKubeProxy {
 		skipPhases = "--skip-phases=addon/kube-proxy"
 	}
 	// 1. Initialize the first master
@@ -98,7 +106,7 @@ if [ ! -f /etc/kubernetes/admin.conf ]; then
     --apiserver-advertise-address %s \
     --pod-network-cidr %s %s
 fi
-`, initialMasterPrivateAddr, initialMasterPrivateAddr, podCIDR, skipPhases)
+`, conf.InitialMasterPrivateAddr, conf.InitialMasterPrivateAddr, conf.PodCIDR, skipPhases)
 	fmt.Printf("Initializing primary master: %s\n", initialMaster)
 	runCmd(initialMaster, initCmd)
 	fmt.Printf("Primary master %s initialized.\n", initialMaster)
@@ -111,7 +119,7 @@ fi
 	runCmd(initialMaster, "sudo chown root:root /root/.kube/config")
 
 	kubeProxyReplacement := "true"
-	if !enableKubeProxy {
+	if !conf.EnableKubeProxy {
 		kubeProxyReplacement = "false"
 	}
 	// 3. Install CNI plugin (Cilium in this case)
@@ -130,9 +138,10 @@ fi
 			"--set loadBalancer.mode=dsr " +
 			"--set loadBalancer.algorithm=maglev " +
 			"--set loadBalancer.dsrDispatch=geneve " +
-			"--set ipam.operator.clusterPoolIPv4PodCIDRList=10.42.0.0/16 " +
+			fmt.Sprintf("--set ipam.operator.clusterPoolIPv4PodCIDRList=%s ", conf.PodCIDR) +
 			"--set ipam.operator.clusterPoolIPv4MaskSize=26 " +
-			fmt.Sprintf("--set k8sServiceHost=%s ", initialMasterPrivateAddr) +
+			"--set nodePort.enabled=true " +
+			fmt.Sprintf("--set k8sServiceHost=%s ", conf.InitialMasterPrivateAddr) +
 			"--set k8sServicePort=6443",
 	}, " && ")
 
@@ -154,30 +163,64 @@ fi
 		time.Sleep(5 * time.Second)
 	}
 
-	// update kubeadm config to use advertiseAddr
-	fmt.Println("Updating kubeadm config to use advertiseAddr...")
-	clusterConfig := runCmd(initialMaster, "sudo kubectl -n kube-system get configmap kubeadm-config -o jsonpath='{.data.ClusterConfiguration}'")
-	fmt.Println("Cluster config: \n", clusterConfig)
-	// Parse YAML as map for flexibility
-	var cc map[string]interface{}
-	if err := yaml.Unmarshal([]byte(clusterConfig), &cc); err != nil {
-		log.Fatalf("unmarshal error: %w", err)
-	}
-	cc["controlPlaneEndpoint"] = fmt.Sprintf("%s:6443", advertiseAddr)
-	updated, err := yaml.Marshal(&cc)
+	// Apply BGP configuration
+	fmt.Println("Applying BGP configuration for apps...")
+	bgpTmpl, err := template.New("bgpYaml").Parse(bgpYaml)
 	if err != nil {
-		log.Fatalf("marshal error: %w", err)
+		log.Fatalf("failed to parse bgp template: %v", err)
+	}
+	var rendered bytes.Buffer
+	err = bgpTmpl.Execute(&rendered, conf)
+	if err != nil {
+		log.Fatalf("failed to execute template: %v", err)
+	}
+	bgpCmd := fmt.Sprintf("cat <<EOF | kubectl apply -f -\n%s\nEOF", rendered.String())
+	runCmd(initialMaster, bgpCmd)
+
+	// update k8s service to LoadBalancer
+	if conf.AdvertiseAddr != "" {
+		// Apply Cilium BGP configuration
+		fmt.Println("Applying Cilium BGP configuration. for ControlPlane..")
+		bgpTmpl, err := template.New("bgpYaml").Parse(bgpYaml)
+		if err != nil {
+			log.Fatalf("failed to parse bgp template: %v", err)
+		}
+		var rendered bytes.Buffer
+		err = bgpTmpl.Execute(&rendered, conf)
+		cpBGPCmd := fmt.Sprintf("cat <<EOF | kubectl apply -f -\n%s\nEOF", rendered.String())
+		runCmd(initialMaster, cpBGPCmd)
+
+		fmt.Println("Updating Kubernetes service to LoadBalancer...")
+		updateServiceCmd := fmt.Sprintf(`kubectl -n default patch svc kubernetes -p '{"spec": {"type": "LoadBalancer", "loadBalancerIP": "%s"}}'`, conf.AdvertiseAddr)
+		runCmd(initialMaster, updateServiceCmd)
 	}
 
-	// Write to temp file on the remote host
-	tmpFile := "/tmp/cc.yaml"
-	// Copy file: use scp, or echo via SSH
-	// Example:
-	runCmd(initialMaster, fmt.Sprintf("echo \"%s\" > %s", string(updated), tmpFile))
+	// update kubeadm config to use advertiseAddr
+	if conf.AdvertiseAddr != "" && conf.UseAdvertisedAddrInKubeadm {
+		fmt.Println("Updating kubeadm config to use advertiseAddr...")
+		clusterConfig := runCmd(initialMaster, "sudo kubectl -n kube-system get configmap kubeadm-config -o jsonpath='{.data.ClusterConfiguration}'")
 
-	// Now update the ConfigMap with kubectl
-	patchCmd := fmt.Sprintf("kubectl -n kube-system create configmap kubeadm-config --from-file=ClusterConfiguration=%s --dry-run=client -o yaml | kubectl -n kube-system replace -f -", tmpFile)
-	runCmd(initialMaster, patchCmd)
+		// Parse YAML as map for flexibility
+		var cc map[string]interface{}
+		if err := yaml.Unmarshal([]byte(clusterConfig), &cc); err != nil {
+			log.Fatalf("unmarshal error: %w", err)
+		}
+		cc["controlPlaneEndpoint"] = fmt.Sprintf("%s:6443", conf.InitialMasterPrivateAddr)
+		updated, err := yaml.Marshal(&cc)
+		if err != nil {
+			log.Fatalf("marshal error: %w", err)
+		}
+
+		// Write to temp file on the remote host
+		tmpFile := "/tmp/cc.yaml"
+		// Copy file: use scp, or echo via SSH
+		// Example:
+		runCmd(initialMaster, fmt.Sprintf("echo \"%s\" > %s", string(updated), tmpFile))
+
+		// Now update the ConfigMap with kubectl
+		patchCmd := fmt.Sprintf("kubectl -n kube-system create configmap kubeadm-config --from-file=ClusterConfiguration=%s --dry-run=client -o yaml | kubectl -n kube-system replace -f -", tmpFile)
+		runCmd(initialMaster, patchCmd)
+	}
 	// 3. Retrieve credentials
 	timeout = 5 * time.Minute
 	start = time.Now()
@@ -231,7 +274,7 @@ fi
 		h := m
 		joinCmd := fmt.Sprintf(
 			"sudo kubeadm join %s:6443 --token %s --discovery-token-ca-cert-hash %s --control-plane --certificate-key %s",
-			advertiseAddr, token, caHash, certKey,
+			conf.InitialMasterPrivateAddr, token, caHash, certKey,
 		)
 		fmt.Printf("Joining master node: %s\n", h)
 		runCmd(h, joinCmd)
@@ -246,7 +289,7 @@ fi
 			h := w
 			joinWorker := fmt.Sprintf(
 				"sudo kubeadm join %s:6443 --token %s --discovery-token-ca-cert-hash %s",
-				advertiseAddr, token, caHash,
+				conf.InitialMasterPrivateAddr, token, caHash,
 			)
 			fmt.Printf("Joining worker node: %s\n", h)
 			runCmd(h, joinWorker)
@@ -254,6 +297,9 @@ fi
 		}
 	}
 
+	// label node-role to all the workers
+	nodeRoleCmd := "kubectl get nodes --selector='!node-role.kubernetes.io/control-plane' -o name | xargs -I{} kubectl label {} node-role.kubernetes.io/worker=	"
+	runCmd(initialMaster, nodeRoleCmd)
 	fmt.Println("Cluster creation complete.")
 }
 

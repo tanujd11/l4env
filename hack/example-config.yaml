@@ -1,0 +1,5 @@
+advertiseAddr: 10.10.0.6
+initialMasterPrivateAddr: 172.31.26.214
+bgpPeerAddress: 172.31.23.53
+bgpPeerASN: 64514
+loadBalancerIPPoolCIDR: 10.10.0.0/16

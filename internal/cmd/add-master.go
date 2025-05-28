@@ -1,4 +1,4 @@
-package internal
+package cmd
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/tanujd11/l4env/internal/config"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -26,6 +27,14 @@ func AddMasterCommand() *cobra.Command {
 				log.Fatal("Either --key or --password must be provided for SSH authentication")
 			}
 
+			var conf config.ResolvedConfig
+			var err error
+			if filePath != "" {
+				conf, err = config.ResolveConfig(filePath)
+				if err != nil {
+					log.Fatalf("Failed to resolve configuration file %s: %v", filePath, err)
+				}
+			}
 			// Parse lists
 			pm := filterEmpty(strings.Split(primary, ","))
 			nm := filterEmpty(strings.Split(newMasters, ","))
@@ -61,7 +70,7 @@ func AddMasterCommand() *cobra.Command {
 			for _, m := range nm {
 				joinCmd := fmt.Sprintf(
 					"sudo kubeadm join %s:6443 --token %s --discovery-token-ca-cert-hash %s --control-plane --certificate-key %s --control-plane-endpoint %s:6443",
-					advertiseAddr, token, caHash, certKey, advertiseAddr,
+					conf.AdvertiseAddr, token, caHash, certKey, conf.AdvertiseAddr,
 				)
 				runCmd(m, joinCmd)
 				fmt.Printf("Master %s joined as control-plane.\n", m)
@@ -76,7 +85,6 @@ func AddMasterCommand() *cobra.Command {
 	cmd.Flags().StringVar(&sshUser, "user", "root", "SSH user")
 	cmd.Flags().StringVar(&sshKeyPath, "key", "", "Path to private key file")
 	cmd.Flags().StringVar(&sshPassword, "password", "", "SSH password (optional)")
-	cmd.Flags().StringVar(&advertiseAddr, "control-plane-endpoint", "", "ControlPlaneEndpoint (DNS or VIP) for the cluster")
 
 	// Required
 	cmd.MarkFlagRequired("primary")

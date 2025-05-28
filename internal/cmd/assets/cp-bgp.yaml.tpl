@@ -1,40 +1,32 @@
-apiVersion: "cilium.io/v2alpha1"
-kind: CiliumLoadBalancerIPPool
-metadata:
-  name: pool
-spec:
-  blocks:
-  - cidr: "10.10.0.0/24"
----
 apiVersion: cilium.io/v2alpha1
 kind: CiliumBGPClusterConfig
 metadata:
-  name: bgp-internal
+  name: bgp-internal-control-plane
 spec:
   nodeSelector:
     matchLabels:
-      node-role.kubernetes.io/worker: ""
+      node-role.kubernetes.io/control-plane: ""
   bgpInstances:
   - name: internal
     localASN: 64512
     peers:
     - name: frr-router
-      peerASN: 64514
-      peerAddress: 172.31.23.153
+      peerASN: {{ .BGPPeerASN }}
+      peerAddress: {{ .BGPPeerAddress }}
       peerConfigRef:
-        name: cilium-peer
+        name: cilium-peer-control-plane
 ---
 apiVersion: cilium.io/v2alpha1
 kind: CiliumBGPPeerConfig
 metadata:
-  name: cilium-peer
+  name: cilium-peer-control-plane
 spec:
   families:
   - afi: ipv4
     safi: unicast
     advertisements:
       matchLabels:
-        advertise: "bgp"
+        advertise: "control-plane"
   gracefulRestart:
     enabled: true
     restartTimeSeconds: 15
@@ -42,9 +34,9 @@ spec:
 apiVersion: cilium.io/v2alpha1
 kind: CiliumBGPAdvertisement
 metadata:
-  name: bgp-advertisements
+  name: bgp-advertisements-cp
   labels:
-    advertise: bgp
+    advertise: control-plane
 spec:
   advertisements:
   - advertisementType: "Service"
@@ -53,5 +45,4 @@ spec:
       - LoadBalancerIP
     selector:
       matchExpressions:
-      # All services
-      - {key: somekey, operator: NotIn, values: ['never-used-value']}
+      - {key: component, operator: In, values: ['apiserver']}
