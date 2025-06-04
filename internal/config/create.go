@@ -31,6 +31,16 @@ type Config struct {
 	BGPPeerAddress string `mapstructure:"bgpPeerAddress"`
 	// BGPPeerASN is the ASN of the BGP peer
 	BGPPeerASN int `mapstructure:"bgpPeerASN"`
+	// MITMVIP is the VIP for the MITM service
+	MITMVIP string `mapstructure:"mitmVIP"`
+	// MITMSecretConfig
+	MITMSecretConfig string `mapstructure:"mitmSecretConfig"`
+	// EnvoyImage is the image to use for Envoy
+	EnvoyImage string `mapstructure:"envoyImage"`
+	// ExtProcImage is the image to use for the external processor
+	ExtProcImage string `mapstructure:"extProcImage"`
+	// ImagePullSecretData is the image pull secret to use for mitm images
+	ImagePullSecretData string `mapstructure:"imagePullSecretData"`
 }
 
 type ResolvedConfig struct {
@@ -50,6 +60,16 @@ type ResolvedConfig struct {
 	BGPPeerAddress string
 	// BGPPeerASN is the ASN of the BGP peer
 	BGPPeerASN int
+	// MITMVIP is the VIP for the MITM service
+	MITMVIP string
+	// MITMSecretConfig is the secret config for the MITM service
+	MITMSecretConfig string
+	// EnvoyImage is the image to use for Envoy
+	EnvoyImage string
+	// ExtProcImage is the image to use for the external processor
+	ExtProcImage string
+	// ImagePullSecretData is the image pull secret to use for mitm images
+	ImagePullSecretData string
 }
 
 func ResolveConfig(configFilePath string) (ResolvedConfig, error) {
@@ -81,6 +101,11 @@ func ResolveConfig(configFilePath string) (ResolvedConfig, error) {
 		LoadBalancerIPPoolCIDR:     config.LoadBalancerIPPoolCIDR,
 		BGPPeerAddress:             config.BGPPeerAddress,
 		BGPPeerASN:                 config.BGPPeerASN,
+		MITMVIP:                    config.MITMVIP,
+		MITMSecretConfig:           config.MITMSecretConfig,
+		EnvoyImage:                 config.EnvoyImage,
+		ExtProcImage:               config.ExtProcImage,
+		ImagePullSecretData:        config.ImagePullSecretData,
 	}
 
 	err = validateConfig(resolvedConfig)

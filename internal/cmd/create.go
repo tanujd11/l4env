@@ -24,6 +24,12 @@ var bgpYaml string
 //go:embed assets/cp-bgp.yaml.tpl
 var cpBGPYaml string
 
+//go:embed assets/setup.sh.tpl
+var setupScript string
+
+//go:embed assets/mitm.yaml.tpl
+var mitmManifests string
+
 var (
 	masters     string
 	workers     string
@@ -54,7 +60,6 @@ func ClusterCommand() *cobra.Command {
 
 	// Required flags
 	cmd.MarkFlagRequired("masters")
-	cmd.MarkFlagRequired("initial-master-private-addr")
 
 	return cmd
 }
@@ -72,6 +77,9 @@ func run(cmd *cobra.Command, args []string) {
 		if err != nil {
 			log.Fatalf("Failed to resolve configuration file %s: %v", filePath, err)
 		}
+	}
+	if conf.InitialMasterPrivateAddr == "" {
+		conf.InitialMasterPrivateAddr = strings.Split(masters, ",")[0]
 	}
 	masterList := filterEmpty(strings.Split(masters, ","))
 	initialMaster := masterList[0]
@@ -119,7 +127,7 @@ fi
 	runCmd(initialMaster, "sudo chown root:root /root/.kube/config")
 
 	kubeProxyReplacement := "true"
-	if !conf.EnableKubeProxy {
+	if conf.EnableKubeProxy {
 		kubeProxyReplacement = "false"
 	}
 	// 3. Install CNI plugin (Cilium in this case)
@@ -152,7 +160,7 @@ fi
 	timeout := 5 * time.Minute
 	start := time.Now()
 	for {
-		ciliumStatus := runCmd(initialMaster, "sudo kubectl get pods -n kube-system -l k8s-app=cilium -o jsonpath='{.items[0].status.phase}'")
+		ciliumStatus := runCmd(initialMaster, "kubectl get pods -n kube-system -l k8s-app=cilium -o jsonpath='{.items[0].status.phase}'")
 		if ciliumStatus == "Running" {
 			break
 		}
@@ -181,7 +189,7 @@ fi
 	if conf.AdvertiseAddr != "" {
 		// Apply Cilium BGP configuration
 		fmt.Println("Applying Cilium BGP configuration. for ControlPlane..")
-		bgpTmpl, err := template.New("bgpYaml").Parse(bgpYaml)
+		bgpTmpl, err := template.New("bgpYaml").Parse(cpBGPYaml)
 		if err != nil {
 			log.Fatalf("failed to parse bgp template: %v", err)
 		}
@@ -198,7 +206,7 @@ fi
 	// update kubeadm config to use advertiseAddr
 	if conf.AdvertiseAddr != "" && conf.UseAdvertisedAddrInKubeadm {
 		fmt.Println("Updating kubeadm config to use advertiseAddr...")
-		clusterConfig := runCmd(initialMaster, "sudo kubectl -n kube-system get configmap kubeadm-config -o jsonpath='{.data.ClusterConfiguration}'")
+		clusterConfig := runCmd(initialMaster, "kubectl -n kube-system get configmap kubeadm-config -o jsonpath='{.data.ClusterConfiguration}'")
 
 		// Parse YAML as map for flexibility
 		var cc map[string]interface{}
@@ -221,6 +229,19 @@ fi
 		patchCmd := fmt.Sprintf("kubectl -n kube-system create configmap kubeadm-config --from-file=ClusterConfiguration=%s --dry-run=client -o yaml | kubectl -n kube-system replace -f -", tmpFile)
 		runCmd(initialMaster, patchCmd)
 	}
+
+	// Install MITMProxy manifests
+	fmt.Println("Installing MITMProxy manifests...")
+	mitmManifestsTpl, err := template.New("mitmManifests").Parse(mitmManifests)
+	if err != nil {
+		log.Fatalf("failed to parse mitmproxy template: %v", err)
+	}
+	var renderedManifests bytes.Buffer
+	err = mitmManifestsTpl.Execute(&renderedManifests, conf)
+	mitmManifestsCmd := fmt.Sprintf("cat <<EOF | kubectl apply -f -\n%s\nEOF", renderedManifests.String())
+	fmt.Println(mitmManifestsCmd)
+	runCmd(initialMaster, mitmManifestsCmd)
+
 	// 3. Retrieve credentials
 	timeout = 5 * time.Minute
 	start = time.Now()
@@ -272,12 +293,14 @@ fi
 	// 3. Join additional masters
 	for _, m := range masterList[1:] {
 		h := m
-		joinCmd := fmt.Sprintf(
-			"sudo kubeadm join %s:6443 --token %s --discovery-token-ca-cert-hash %s --control-plane --certificate-key %s",
-			conf.InitialMasterPrivateAddr, token, caHash, certKey,
-		)
+		joinCmd := fmt.Sprintf(`
+if [ ! -f /etc/kubernetes/admin.conf ]; then
+sudo kubeadm join %s:6443 --token %s --discovery-token-ca-cert-hash %s --control-plane --certificate-key %s
+fi
+`, conf.InitialMasterPrivateAddr, token, caHash, certKey)
 		fmt.Printf("Joining master node: %s\n", h)
 		runCmd(h, joinCmd)
+
 		fmt.Printf("Master %s joined.\n", h)
 	}
 
@@ -287,12 +310,31 @@ fi
 	} else {
 		for _, w := range workerList {
 			h := w
-			joinWorker := fmt.Sprintf(
-				"sudo kubeadm join %s:6443 --token %s --discovery-token-ca-cert-hash %s",
-				conf.InitialMasterPrivateAddr, token, caHash,
-			)
+			joinWorker := fmt.Sprintf(`
+if [ ! -f /etc/kubernetes/kubelet.conf ]; then
+sudo kubeadm join %s:6443 --token %s --discovery-token-ca-cert-hash %s
+fi
+`, conf.InitialMasterPrivateAddr, token, caHash)
 			fmt.Printf("Joining worker node: %s\n", h)
 			runCmd(h, joinWorker)
+
+			// Adding IP Table rules on worker nodes
+			setupShTPL, err := template.New("setupsh").Parse(setupScript)
+			if err != nil {
+				log.Fatalf("failed to parse setup script template: %v", err)
+			}
+			var rendered bytes.Buffer
+			err = setupShTPL.Execute(&rendered, struct {
+				MITMVIP string
+			}{
+				MITMVIP: conf.MITMVIP,
+			})
+			if err != nil {
+				log.Fatalf("failed to execute template: %v", err)
+			}
+			runCmd(h, fmt.Sprintf("cat <<'EOF' | sudo tee /tmp/setup.sh >/dev/null\n%s\nEOF", rendered.String()))
+			runCmd(h, "sudo chmod +x /tmp/setup.sh")
+			runCmd(h, "sudo bash /tmp/setup.sh")
 			fmt.Printf("Worker %s joined.\n", h)
 		}
 	}
