@@ -160,7 +160,12 @@ fi
 	timeout := 5 * time.Minute
 	start := time.Now()
 	for {
-		ciliumStatus := runCmd(initialMaster, "kubectl get pods -n kube-system -l k8s-app=cilium -o jsonpath='{.items[0].status.phase}'")
+		ciliumStatus, err := runCmdAndReturnErrIfAny(initialMaster, "kubectl get pods -n kube-system -l k8s-app=cilium -o jsonpath='{.items[0].status.phase}'")
+		if err != nil {
+			log.Printf("Error checking Cilium status: %v", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
 		if ciliumStatus == "Running" {
 			break
 		}
@@ -238,7 +243,7 @@ fi
 	}
 	var renderedManifests bytes.Buffer
 	err = mitmManifestsTpl.Execute(&renderedManifests, conf)
-	mitmManifestsCmd := fmt.Sprintf("cat <<EOF | kubectl apply -f -\n%s\nEOF", renderedManifests.String())
+	mitmManifestsCmd := fmt.Sprintf("cat <<'EOF' | kubectl apply -f -\n%s\nEOF\n", renderedManifests.String())
 	fmt.Println(mitmManifestsCmd)
 	runCmd(initialMaster, mitmManifestsCmd)
 

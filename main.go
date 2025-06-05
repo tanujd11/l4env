@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 Tanuj Dwivedi dwiveditanuj41@gmail.com
+Copyright © 2025 Tetrateio Inc. All rights reserved.
 */
 package main
 

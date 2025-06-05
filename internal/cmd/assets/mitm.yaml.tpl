@@ -211,7 +211,7 @@ metadata:
   name: payload-detector
   namespace: default
 data:
-  server.go: |
+  server.go: |-
     package main
 
     import (
@@ -423,4 +423,3 @@ data:
 
       return body, nil
     }
----
