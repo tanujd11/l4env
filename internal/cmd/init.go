@@ -42,8 +42,16 @@ func SSHClientConfig() *ssh.ClientConfig {
 	}
 }
 
-// runCmd executes a command over SSH on the given host
 func runCmd(host, command string) string {
+	output, err := runCmdAndReturnErrIfAny(host, command)
+	if err != nil {
+		log.Fatalf("Command Failed: %v", err)
+	}
+	return output
+}
+
+// runCmd executes a command over SSH on the given host
+func runCmdAndReturnErrIfAny(host, command string) (string, error) {
 	addr := fmt.Sprintf("%s:%d", host, sshPort)
 	client, err := ssh.Dial("tcp", addr, SSHClientConfig())
 	if err != nil {
@@ -60,9 +68,9 @@ func runCmd(host, command string) string {
 	sess.Stdout = &buf
 	sess.Stderr = &buf
 	if err := sess.Run(command); err != nil {
-		log.Fatalf("Command '%s' on %s failed: %v\nOutput: %s", command, host, err, buf.String())
+		return "", fmt.Errorf("Command '%s' on %s failed: %v\nOutput: %s", command, host, err, buf.String())
 	}
-	return strings.TrimSpace(buf.String())
+	return strings.TrimSpace(buf.String()), nil
 }
 
 // installPrereqs installs kubeadm prerequisites and kubeadm itself on host

@@ -4,13 +4,14 @@ ENVOY_PORT="12001"
 ENVOY_MARK="1"              
 POD_ENVOY_UID="101"         
 ROUTE_TABLE="100"
-TUN_IF="tunl4"          
-MAIN_IF="eth0"           
+TUN_IF="mitm-tunnel"          
+MAIN_IF=$(ip -o -4 route show to default | awk '{print $5}' | cut -d/ -f1)
 INSTANCE_IP=$(ip -o -4 addr show ${MAIN_IF} | awk '{print $4}' | cut -d/ -f1)
 # ────────────────────────────────────────────────────────────
 
 sudo ip tunnel add ${TUN_IF} mode ipip local {{ .MITMVIP }}
 sudo ip link set ${TUN_IF} up
+sudo ip addr add {{ .MITMVIP }}/32 dev ${TUN_IF}
 
 echo "==> using TUN_IF=${TUN_IF} MAIN_IF=${MAIN_IF} INSTANCE_IP=${INSTANCE_IP}"
 
@@ -69,6 +70,12 @@ sudo iptables -t mangle -I PREROUTING 2 -p tcp -j MITM_MANGLE_PREROUTING
 sudo iptables -t mangle -A MITM_MANGLE_PREROUTING -i lo -j RETURN
 sudo iptables -t mangle -A MITM_MANGLE_PREROUTING -p tcp --dport 22 -j RETURN
 sudo iptables -t mangle -A MITM_MANGLE_PREROUTING -p tcp --dport ${ENVOY_PORT} -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_PREROUTING -p tcp --dport 179 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_PREROUTING -d 10.0.0.0/8 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_PREROUTING -d 192.0.0.0/8 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_PREROUTING -d 172.0.0.0/8 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_PREROUTING -p tcp --dport 53 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_PREROUTING -p tcp --dport 10250 -j RETURN
 sudo iptables -t mangle -A MITM_MANGLE_PREROUTING \
      -i ${TUN_IF} -p tcp ! -d ${INSTANCE_IP}/32 -j MITM_MANGLE_TPROXY
 
@@ -83,6 +90,12 @@ sudo iptables -t mangle -A MITM_MANGLE_OUTPUT \
      -m owner --uid-owner ${POD_ENVOY_UID} -j RETURN
 sudo iptables -t mangle -A MITM_MANGLE_OUTPUT -o lo -j RETURN
 sudo iptables -t mangle -A MITM_MANGLE_OUTPUT -p tcp --dport 22 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_OUTPUT -p tcp --dport 179 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_OUTPUT -d 10.0.0.0/8 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_OUTPUT -d 172.0.0.0/8 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_OUTPUT -d 192.0.0.0/8 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_OUTPUT -p tcp --dport 53 -j RETURN
+sudo iptables -t mangle -A MITM_MANGLE_OUTPUT -p tcp --dport 10250 -j RETURN
 
 if ! sudo iptables -t nat -C POSTROUTING -o ${MAIN_IF} -j MASQUERADE 2>/dev/null; then
   sudo iptables -t nat -A POSTROUTING -o ${MAIN_IF} -j MASQUERADE
@@ -96,11 +109,23 @@ sudo iptables -t filter -A MITM_FILTER_INPUT -m conntrack --ctstate RELATED,ESTA
 sudo iptables -t filter -A MITM_FILTER_INPUT -p tcp --dport 22 -j ACCEPT
 sudo iptables -t filter -A MITM_FILTER_INPUT -p tcp --dport ${ENVOY_PORT} -j ACCEPT
 sudo iptables -t filter -A MITM_FILTER_INPUT -m mark --mark ${ENVOY_MARK} -j ACCEPT
+sudo iptables -t filter -A MITM_FILTER_INPUT -d 10.0.0.0/8 -j ACCEPT
+sudo iptables -t filter -A MITM_FILTER_INPUT -d 192.0.0.0/8 -j ACCEPT
+sudo iptables -t filter -A MITM_FILTER_INPUT -d 172.0.0.0/8 -j ACCEPT
+sudo iptables -t filter -A MITM_FILTER_INPUT -p tcp --dport 53 -j ACCEPT
+sudo iptables -t filter -A MITM_FILTER_INPUT -p tcp --dport 10250 -j ACCEPT
+# Kubelet
+sudo iptables -t filter -I MITM_FILTER_INPUT -p tcp --dport 10250 -j ACCEPT
+# Ping
 sudo iptables -t filter -A MITM_FILTER_INPUT -p icmp -j ACCEPT
 # Allow tunnel traffic
 sudo iptables -t filter -I MITM_FILTER_INPUT 3 -p 4 -j ACCEPT
+# VXLAN (UDP 8472)
+sudo iptables -t filter -A MITM_FILTER_INPUT -p udp --dport 8472 -j ACCEPT
+# Geneve (UDP 6081)
+sudo iptables -t filter -A MITM_FILTER_INPUT -p udp --dport 6081 -j ACCEPT
 # Drop everything else
-sudo iptables -t filter -A MITM_FILTER_INPUT -j DROP
+sudo iptables -t filter -A MITM_FILTER_INPUT -j DROP   
 
 sudo iptables -t filter -A MITM_FILTER_FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 sudo iptables -t filter -A MITM_FILTER_FORWARD -m mark --mark ${ENVOY_MARK} -j ACCEPT
