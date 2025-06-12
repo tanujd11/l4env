@@ -60,7 +60,7 @@ func AddWorkerCommand() *cobra.Command {
 				fmt.Printf("Worker %s joined.\n", w)
 			}
 			// label node-role to all the workers
-			nodeRoleCmd := "kubectl get nodes --selector='!node-role.kubernetes.io/control-plane' -o name | xargs -I{} kubectl label {} node-role.kubernetes.io/worker=	"
+			nodeRoleCmd := "kubectl get nodes --selector='!node-role.kubernetes.io/control-plane' -o name | xargs -I{} kubectl label {} node-role.kubernetes.io/worker="
 			runCmd(primary, nodeRoleCmd)
 			fmt.Println("Cluster creation complete.")
 		},

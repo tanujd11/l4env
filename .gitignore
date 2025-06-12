@@ -1,3 +1,5 @@
 l4env*
 bin
 .terraform*
+**/terraform.tfstate
+**/terraform.tfstate.backup

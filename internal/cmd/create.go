@@ -122,9 +122,9 @@ fi
 	// 2. Retrieve join credentials
 	fmt.Println("Retrieving join credentials...")
 	fmt.Println("Copying kubeconfig to /root/.kube/config...")
-	runCmd(initialMaster, "sudo mkdir -p /root/.kube")
-	runCmd(initialMaster, "sudo cp /etc/kubernetes/admin.conf /root/.kube/config")
-	runCmd(initialMaster, "sudo chown root:root /root/.kube/config")
+	runCmd(initialMaster, "mkdir -p $HOME/.kube")
+	runCmd(initialMaster, "sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config")
+	runCmd(initialMaster, "sudo chown $(id -u):$(id -g) $HOME/.kube/config")
 
 	kubeProxyReplacement := "true"
 	if conf.EnableKubeProxy {
@@ -132,9 +132,9 @@ fi
 	}
 	// 3. Install CNI plugin (Cilium in this case)
 	cniCmd := strings.Join([]string{
-		"sudo helm repo add cilium https://helm.cilium.io/",
-		"sudo helm repo update",
-		"sudo helm upgrade --install cilium cilium/cilium --version 1.17.3 " +
+		"helm repo add cilium https://helm.cilium.io/",
+		"helm repo update",
+		"helm upgrade --install cilium cilium/cilium --version 1.17.3 " +
 			"--namespace kube-system " +
 			"--set egressGateway.enabled=true " +
 			"--set bgpControlPlane.enabled=true " +
@@ -345,7 +345,7 @@ fi
 	}
 
 	// label node-role to all the workers
-	nodeRoleCmd := "kubectl get nodes --selector='!node-role.kubernetes.io/control-plane' -o name | xargs -I{} kubectl label {} node-role.kubernetes.io/worker=	"
+	nodeRoleCmd := "kubectl get nodes --selector='!node-role.kubernetes.io/control-plane' -o name | xargs -I{} kubectl label {} node-role.kubernetes.io/worker="
 	runCmd(initialMaster, nodeRoleCmd)
 	fmt.Println("Cluster creation complete.")
 }
