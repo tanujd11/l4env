@@ -30,6 +30,11 @@ variable "asg_ami_id" {
   type        = string
 }
 
+variable "block_device_name" {
+  description = "block device name for asg ami default storage"
+  type        = string
+}
+
 variable "private_key_path" {
   description = "Path to your local private key file if using an existing SSH key pair (required if ssh_key_name is set)."
   type        = string
