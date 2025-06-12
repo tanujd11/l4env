@@ -2,14 +2,6 @@ variable "region" {
   default = "us-east-1"
 }
 
-variable "vpc_id" {
-    type = string
-}
-
-variable "subnet_id" {
-  type = string
-}
-
 variable "frr_ami_id" {
   description = "AMI ID for the instance"
   type        = string
@@ -39,11 +31,11 @@ variable "private_key_path" {
 variable "bgp_listen_range" {
   description = "The CIDR range for BGP listen command."
   type        = string
-  default     = "172.31.0.0/16"
+  default     = "10.0.0.0/16"
 }
 
 variable "mitm_vip" {
-    type = string
+  type = string
 }
 
 variable "image_pull_secret_data" {
