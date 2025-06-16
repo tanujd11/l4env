@@ -244,7 +244,6 @@ fi
 	var renderedManifests bytes.Buffer
 	err = mitmManifestsTpl.Execute(&renderedManifests, conf)
 	mitmManifestsCmd := fmt.Sprintf("cat <<'EOF' | kubectl apply -f -\n%s\nEOF\n", renderedManifests.String())
-	fmt.Println(mitmManifestsCmd)
 	runCmd(initialMaster, mitmManifestsCmd)
 
 	// 3. Retrieve credentials
@@ -276,8 +275,6 @@ fi
 	if token == "" || caHash == "" {
 		log.Fatalf("failed to parse token or CA hash after retries: %q", joinOutput)
 	}
-	fmt.Println("token:", token)
-	fmt.Println("caHash:", caHash)
 
 	// 4. Retrieve certificate key for control-plane join with timeout-based retry
 	start = time.Now()
@@ -294,7 +291,6 @@ fi
 		log.Printf("Waiting for certificate key, retrying in 5s... last output: %q", uploadOutput)
 		time.Sleep(5 * time.Second)
 	}
-	fmt.Println("certKey:", certKey)
 	// 3. Join additional masters
 	for _, m := range masterList[1:] {
 		h := m
