@@ -1,8 +1,8 @@
 # If ssh_key_name is not set, generate one
 resource "tls_private_key" "generated" {
-  count      = var.ssh_key_name == "" ? 1 : 0
-  algorithm  = "RSA"
-  rsa_bits   = 4096
+  count     = var.ssh_key_name == "" ? 1 : 0
+  algorithm = "RSA"
+  rsa_bits  = 4096
 }
 
 resource "aws_key_pair" "generated" {
@@ -12,14 +12,14 @@ resource "aws_key_pair" "generated" {
 }
 
 resource "random_id" "suffix" {
-  count = var.ssh_key_name == "" ? 1 : 0
+  count       = var.ssh_key_name == "" ? 1 : 0
   byte_length = 4
 }
 
 # Pick the key name to use
 locals {
-  final_key_name = var.ssh_key_name != "" ? var.ssh_key_name : aws_key_pair.generated[0].key_name
-  private_key    = var.ssh_key_name != "" ? file(var.private_key_path) : tls_private_key.generated[0].private_key_pem
+  final_key_name            = var.ssh_key_name != "" ? var.ssh_key_name : aws_key_pair.generated[0].key_name
+  private_key               = var.ssh_key_name != "" ? file(var.private_key_path) : tls_private_key.generated[0].private_key_pem
   private_key_path_for_copy = var.ssh_key_name != "" ? var.private_key_path : "${path.module}/auto-generated-key.pem"
   config_yaml = templatefile("${path.module}/config.yaml.tpl", {
     bgpPeerAddress      = aws_instance.frr_router.private_ip # this gets the new FRR private IP
@@ -30,7 +30,7 @@ locals {
 resource "aws_instance" "frr_router" {
   ami                         = var.frr_ami_id
   instance_type               = var.instance_type
-  subnet_id                   = var.subnet_id
+  subnet_id                   = aws_subnet.public.id
   vpc_security_group_ids      = [aws_security_group.asg_self.id]
   key_name                    = local.final_key_name
   associate_public_ip_address = true
@@ -109,17 +109,17 @@ resource "aws_instance" "frr_router" {
     destination = "/home/ubuntu/ssh_key.pem"
 
     connection {
-        type        = "ssh"
-        user        = "ubuntu"
-        private_key = local.private_key
-        host        = self.public_ip
+      type        = "ssh"
+      user        = "ubuntu"
+      private_key = local.private_key
+      host        = self.public_ip
     }
   }
 
   provisioner "remote-exec" {
     inline = [
-        "chown ubuntu:ubuntu /home/ubuntu/l4env_amd64",
-        "chmod +x /home/ubuntu/l4env_amd64"
+      "chown ubuntu:ubuntu /home/ubuntu/l4env_amd64",
+      "chmod +x /home/ubuntu/l4env_amd64"
     ]
     connection {
       type        = "ssh"
@@ -136,13 +136,13 @@ resource "aws_instance" "frr_router" {
 
 resource "null_resource" "frr_config_upload" {
   triggers = {
-    instance_id = aws_instance.frr_router.id   # Ensures this waits until instance is ready
-    private_ip  = aws_instance.frr_router.private_ip
+    instance_id            = aws_instance.frr_router.id # Ensures this waits until instance is ready
+    private_ip             = aws_instance.frr_router.private_ip
     image_pull_secret_data = var.image_pull_secret_data
   }
 
   provisioner "file" {
-    content     = templatefile("${path.module}/config.yaml.tpl", {
+    content = templatefile("${path.module}/config.yaml.tpl", {
       bgpPeerAddress      = aws_instance.frr_router.private_ip
       imagePullSecretData = var.image_pull_secret_data
     })
@@ -159,8 +159,8 @@ resource "null_resource" "frr_config_upload" {
 
 # Write the generated private key to a local file (for your own SSH use)
 resource "local_file" "private_key" {
-  count    = var.ssh_key_name == "" ? 1 : 0
-  content  = tls_private_key.generated[0].private_key_pem
-  filename = "${path.module}/auto-generated-key.pem"
+  count           = var.ssh_key_name == "" ? 1 : 0
+  content         = tls_private_key.generated[0].private_key_pem
+  filename        = "${path.module}/auto-generated-key.pem"
   file_permission = "0600"
 }

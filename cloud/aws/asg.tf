@@ -6,7 +6,7 @@ resource "random_pet" "asg_suffix" {
 resource "aws_security_group" "asg_self" {
   name        = "asg-self-group-${random_pet.asg_suffix.id}"
   description = "Allow all traffic within this security group"
-  vpc_id      = var.vpc_id
+  vpc_id      = aws_vpc.main.id
 
   # Allow all traffic from same SG
   ingress {
@@ -56,7 +56,7 @@ resource "aws_launch_template" "asg" {
   }
 
   vpc_security_group_ids = [aws_security_group.asg_self.id]
-   iam_instance_profile {
+  iam_instance_profile {
     name = aws_iam_instance_profile.asg_profile.name
   }
 
@@ -89,7 +89,7 @@ resource "aws_autoscaling_group" "asg" {
   min_size            = 4
   max_size            = 4
   desired_capacity    = 4
-  vpc_zone_identifier = [var.subnet_id]
+  vpc_zone_identifier = [aws_subnet.public.id]
   wait_for_capacity_timeout    = "10m"   # Wait up to 10 minutes for desired_capacity
   health_check_type            = "EC2"
   force_delete                 = true
@@ -113,7 +113,7 @@ resource "aws_autoscaling_group" "asg" {
 resource "aws_iam_policy" "disable_src_dst_check" {
   name        = "DisableSourceDestCheck-${random_pet.asg_suffix.id}"
   description = "Allow disabling source/destination check on own instance"
-  policy      = jsonencode({
+  policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
@@ -159,8 +159,8 @@ data "external" "asg_private_ips" {
   program = ["${path.module}/wait-for-asg-ips.sh"]
 
   query = {
-    asg_name      = aws_autoscaling_group.asg.name
+    asg_name       = aws_autoscaling_group.asg.name
     expected_count = 4
-    region        = var.region
+    region         = var.region
   }
 }
