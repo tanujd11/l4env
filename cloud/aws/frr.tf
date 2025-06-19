@@ -69,7 +69,7 @@ resource "aws_instance" "frr_router" {
     iptables -t mangle -F
     iptables -t nat -F
     ip rule del fwmark 42 table fwdtun 2>/dev/null || true
-    ip route flush table fwdtun
+    ip route flush table fwdtun 2>/dev/null || true
 
     # 2. Enable IP forwarding
     echo 1 | tee /proc/sys/net/ipv4/ip_forward
@@ -87,9 +87,6 @@ resource "aws_instance" "frr_router" {
     # 5. Policy routing for marked packets
     ip rule add fwmark 42 table fwdtun
     ip route add default dev mitm-tunnel table fwdtun
-
-    # 6. NAT for outbound traffic via tun0
-    iptables -t nat -A POSTROUTING -o mitm-tunnel -j MASQUERADE
   EOF
 
   provisioner "file" {
