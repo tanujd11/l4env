@@ -1,5 +1,10 @@
+resource "random_pet" "asg_suffix" {
+  length    = 2
+  separator = "-"
+}
+
 resource "aws_security_group" "asg_self" {
-  name        = "asg-self-group"
+  name        = "asg-self-group-${random_pet.asg_suffix.id}"
   description = "Allow all traffic within this security group"
   vpc_id      = aws_vpc.main.id
 
@@ -30,7 +35,7 @@ resource "aws_security_group" "asg_self" {
   }
 
   tags = {
-    Name = "asg-self-group"
+    Name = "asg-self-group-${random_pet.asg_suffix.id}"
   }
 }
 
@@ -39,6 +44,16 @@ resource "aws_launch_template" "asg" {
   image_id      = var.asg_ami_id
   instance_type = var.instance_type
   key_name      = local.final_key_name
+  
+  block_device_mappings {
+    device_name = var.block_device_name
+
+    ebs {
+      delete_on_termination = true
+      volume_size           = 50
+      volume_type           = "gp3"
+    }
+  }
 
   vpc_security_group_ids = [aws_security_group.asg_self.id]
   iam_instance_profile {
@@ -70,14 +85,14 @@ resource "aws_launch_template" "asg" {
 }
 
 resource "aws_autoscaling_group" "asg" {
-  name                      = "asg-group"
-  min_size                  = 4
-  max_size                  = 4
-  desired_capacity          = 4
-  vpc_zone_identifier       = [aws_subnet.public.id]
-  wait_for_capacity_timeout = "10m" # Wait up to 10 minutes for desired_capacity
-  health_check_type         = "EC2"
-  force_delete              = true
+  name                = "asg-group-${random_pet.asg_suffix.id}"
+  min_size            = 4
+  max_size            = 4
+  desired_capacity    = 4
+  vpc_zone_identifier = [aws_subnet.public.id]
+  wait_for_capacity_timeout    = "10m"   # Wait up to 10 minutes for desired_capacity
+  health_check_type            = "EC2"
+  force_delete                 = true
 
   launch_template {
     id      = aws_launch_template.asg.id
@@ -96,7 +111,7 @@ resource "aws_autoscaling_group" "asg" {
 }
 
 resource "aws_iam_policy" "disable_src_dst_check" {
-  name        = "DisableSourceDestCheck"
+  name        = "DisableSourceDestCheck-${random_pet.asg_suffix.id}"
   description = "Allow disabling source/destination check on own instance"
   policy = jsonencode({
     Version = "2012-10-17",
@@ -114,7 +129,7 @@ resource "aws_iam_policy" "disable_src_dst_check" {
 }
 
 resource "aws_iam_role" "ec2_asg_role" {
-  name = "asg-ec2-role"
+  name = "asg-ec2-role-${random_pet.asg_suffix.id}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
@@ -136,7 +151,7 @@ resource "aws_iam_role_policy_attachment" "asg_role_attach_policy" {
 }
 
 resource "aws_iam_instance_profile" "asg_profile" {
-  name = "asg-ec2-profile"
+  name = "asg-ec2-profile-${random_pet.asg_suffix.id}"
   role = aws_iam_role.ec2_asg_role.name
 }
 

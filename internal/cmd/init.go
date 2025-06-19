@@ -81,8 +81,11 @@ func installPrereqs(host string) {
 		"sudo modprobe br_netfilter",
 		"sudo sysctl -w net.bridge.bridge-nf-call-iptables=1",
 		"sudo sysctl -w net.bridge.bridge-nf-call-ip6tables=1",
+		"sudo sysctl -w net.ipv4.ip_forward=1",
 		"sudo apt-get update",
 		"sudo apt-get install -y ca-certificates curl gnupg",
+		"sudo apt-get install -y containerd",
+		"sudo mkdir -p /etc/containerd",
 		// Configure containerd to use SystemdCgroup
 		`cat << 'EOF' | sudo tee /etc/containerd/config.toml > /dev/null
 version = 2

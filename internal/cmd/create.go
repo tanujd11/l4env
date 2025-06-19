@@ -122,9 +122,9 @@ fi
 	// 2. Retrieve join credentials
 	fmt.Println("Retrieving join credentials...")
 	fmt.Println("Copying kubeconfig to /root/.kube/config...")
-	runCmd(initialMaster, "sudo mkdir -p /root/.kube")
-	runCmd(initialMaster, "sudo cp /etc/kubernetes/admin.conf /root/.kube/config")
-	runCmd(initialMaster, "sudo chown root:root /root/.kube/config")
+	runCmd(initialMaster, "mkdir -p $HOME/.kube")
+	runCmd(initialMaster, "sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config")
+	runCmd(initialMaster, "sudo chown $(id -u):$(id -g) $HOME/.kube/config")
 
 	kubeProxyReplacement := "true"
 	if conf.EnableKubeProxy {
@@ -132,9 +132,9 @@ fi
 	}
 	// 3. Install CNI plugin (Cilium in this case)
 	cniCmd := strings.Join([]string{
-		"sudo helm repo add cilium https://helm.cilium.io/",
-		"sudo helm repo update",
-		"sudo helm upgrade --install cilium cilium/cilium --version 1.17.3 " +
+		"helm repo add cilium https://helm.cilium.io/",
+		"helm repo update",
+		"helm upgrade --install cilium cilium/cilium --version 1.17.3 " +
 			"--namespace kube-system " +
 			"--set egressGateway.enabled=true " +
 			"--set bgpControlPlane.enabled=true " +
@@ -244,7 +244,6 @@ fi
 	var renderedManifests bytes.Buffer
 	err = mitmManifestsTpl.Execute(&renderedManifests, conf)
 	mitmManifestsCmd := fmt.Sprintf("cat <<'EOF' | kubectl apply -f -\n%s\nEOF\n", renderedManifests.String())
-	fmt.Println(mitmManifestsCmd)
 	runCmd(initialMaster, mitmManifestsCmd)
 
 	// 3. Retrieve credentials
@@ -276,8 +275,6 @@ fi
 	if token == "" || caHash == "" {
 		log.Fatalf("failed to parse token or CA hash after retries: %q", joinOutput)
 	}
-	fmt.Println("token:", token)
-	fmt.Println("caHash:", caHash)
 
 	// 4. Retrieve certificate key for control-plane join with timeout-based retry
 	start = time.Now()
@@ -294,7 +291,6 @@ fi
 		log.Printf("Waiting for certificate key, retrying in 5s... last output: %q", uploadOutput)
 		time.Sleep(5 * time.Second)
 	}
-	fmt.Println("certKey:", certKey)
 	// 3. Join additional masters
 	for _, m := range masterList[1:] {
 		h := m
@@ -345,7 +341,7 @@ fi
 	}
 
 	// label node-role to all the workers
-	nodeRoleCmd := "kubectl get nodes --selector='!node-role.kubernetes.io/control-plane' -o name | xargs -I{} kubectl label {} node-role.kubernetes.io/worker=	"
+	nodeRoleCmd := "kubectl get nodes --selector='!node-role.kubernetes.io/control-plane' -o name | xargs -I{} kubectl label {} node-role.kubernetes.io/worker="
 	runCmd(initialMaster, nodeRoleCmd)
 	fmt.Println("Cluster creation complete.")
 }

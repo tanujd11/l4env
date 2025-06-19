@@ -130,7 +130,7 @@ resource "aws_instance" "frr_router" {
   }
 
   tags = {
-    Name = "frr-router"
+    Name = "frr-router-${random_pet.asg_suffix.id}"
   }
 }
 

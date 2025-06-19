@@ -22,6 +22,11 @@ variable "asg_ami_id" {
   type        = string
 }
 
+variable "block_device_name" {
+  description = "block device name for asg ami default storage"
+  type        = string
+}
+
 variable "private_key_path" {
   description = "Path to your local private key file if using an existing SSH key pair (required if ssh_key_name is set)."
   type        = string
@@ -42,3 +47,16 @@ variable "image_pull_secret_data" {
   description = "Secret data for image pull"
   type        = string
 }
+
+variable "vpc_cidr_block" {
+  description = "CIDR block for the VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "subnet_cidr_block" {
+  description = "CIDR block for the subnet"
+  type        = string
+  default     = "10.0.1.0/24"
+}
+
